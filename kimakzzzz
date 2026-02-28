@@ -1,207 +1,51 @@
 #!/bin/bash
 
-# UNINSTALL SCRIPT - Kembalikan VPS seperti baru
-# Menghapus semua perubahan keamanan dan reset ke default
+echo "RESTORE VPS KE DEFAULT..."
 
-# Warna output
-NC='\033[0m'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-
-# Cek root
-if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}Harus root!${NC}"
-   exit 1
-fi
-
-# Banner
-clear
-echo -e "${RED}============================================${NC}"
-echo -e "${RED}   UNINSTALL - KEMBALIKAN VPS SEPERTI BARU${NC}"
-echo -e "${RED}============================================${NC}"
-echo -e "${YELLOW}⚠️  PERINGATAN: Script ini akan:${NC}"
-echo -e "   ${YELLOW}•${NC} Mengembalikan SSH ke port 22"
-echo -e "   ${YELLOW}•${NC} Mengaktifkan root login"
-echo -e "   ${YELLOW}•${NC} Mengaktifkan password login"
-echo -e "   ${YELLOW}•${NC} Menonaktifkan fail2ban"
-echo -e "   ${YELLOW}•${NC} Mereset firewall"
-echo -e "   ${YELLOW}•${NC} ${RED}MENGHAPUS user rendzz${NC}"
-echo -e ""
-echo -e "${RED}⚠️  SEMUA KONFIGURASI KEAMANAN AKAN HILANG!${NC}"
-echo -e ""
-
-# Konfirmasi
-read -p "LANJUTKAN UNINSTALL? (ketik 'yakin' untuk lanjut): " confirm
-if [[ "$confirm" != "yakin" ]]; then
-    echo -e "${GREEN}Batal uninstall${NC}"
-    exit 0
-fi
-
-echo -e "${YELLOW}Mulai uninstall dalam 5 detik...${NC}"
-echo -e "Tekan Ctrl+C untuk membatalkan"
-sleep 5
-
-# 1. Kembalikan SSH ke default
-echo -e "${YELLOW}[1/7] Mengembalikan SSH ke default...${NC}"
-
-# Cari backup SSH terbaru
-SSH_BACKUP=$(ls -t /etc/ssh/sshd_config.bak* 2>/dev/null | head -1)
-
-if [[ -f "$SSH_BACKUP" ]]; then
-    cp "$SSH_BACKUP" /etc/ssh/sshd_config
-    echo -e "${GREEN}   • Menggunakan backup: $SSH_BACKUP${NC}"
-else
-    # Kalau ga ada backup, set manual ke default
-    cat > /etc/ssh/sshd_config <<EOF
-# Package generated configuration file
+# Restore SSH config default
+cat > /etc/ssh/sshd_config <<EOF
 Port 22
-Protocol 2
-HostKey /etc/ssh/ssh_host_rsa_key
-HostKey /etc/ssh/ssh_host_ecdsa_key
-HostKey /etc/ssh/ssh_host_ed25519_key
-UsePrivilegeSeparation yes
-KeyRegenerationInterval 3600
-ServerKeyBits 1024
-SyslogFacility AUTH
-LogLevel INFO
-LoginGraceTime 120
 PermitRootLogin yes
-StrictModes yes
-RSAAuthentication yes
-PubkeyAuthentication yes
-IgnoreRhosts yes
-RhostsRSAAuthentication no
-HostbasedAuthentication no
-PermitEmptyPasswords no
-ChallengeResponseAuthentication no
 PasswordAuthentication yes
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+UsePAM yes
 X11Forwarding yes
-X11DisplayOffset 10
 PrintMotd no
-PrintLastLog yes
-TCPKeepAlive yes
 AcceptEnv LANG LC_*
 Subsystem sftp /usr/lib/openssh/sftp-server
-UsePAM yes
 EOF
-    echo -e "${YELLOW}   • Backup tidak ditemukan, pakai config default${NC}"
-fi
 
-# 2. Hapus user rendzz (TAPI TANYA DULU)
-echo -e "${YELLOW}[2/7] Memproses user rendzz...${NC}"
-if id "rendzz" &>/dev/null; then
-    echo -e "${YELLOW}   • User rendzz ditemukan${NC}"
-    read -p "   Hapus user rendzz? (y/n): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Kill semua proses milik rendzz
-        pkill -u rendzz 2>/dev/null
-        userdel -r rendzz 2>/dev/null
-        echo -e "${GREEN}   • User rendzz dihapus${NC}"
-    else
-        echo -e "${YELLOW}   • User rendzz tetap ada${NC}"
-    fi
-else
-    echo -e "${GREEN}   • User rendzz tidak ada${NC}"
-fi
+echo "SSH config restored"
 
-# 3. Nonaktifkan dan hapus fail2ban
-echo -e "${YELLOW}[3/7] Menonaktifkan fail2ban...${NC}"
-systemctl stop fail2ban
-systemctl disable fail2ban
-
-if command -v apt &>/dev/null; then
-    apt remove fail2ban -y
-    apt purge fail2ban -y
-elif command -v yum &>/dev/null; then
-    yum remove fail2ban -y
-fi
-
-rm -rf /etc/fail2ban
-echo -e "${GREEN}   • Fail2ban dihapus${NC}"
-
-# 4. Reset firewall ke default
-echo -e "${YELLOW}[4/7] Mereset firewall...${NC}"
-
-if command -v ufw &>/dev/null; then
-    # UFW
-    ufw --force disable
-    ufw --force reset
-    echo -e "${GREEN}   • UFW direset${NC}"
-    
-elif command -v firewall-cmd &>/dev/null; then
-    # Firewalld
-    systemctl stop firewalld
-    systemctl disable firewalld
-    yum remove firewalld -y 2>/dev/null
-    echo -e "${GREEN}   • Firewalld dihapus${NC}"
-    
-elif command -v iptables &>/dev/null; then
-    # Iptables
-    iptables -F
-    iptables -X
-    iptables -t nat -F
-    iptables -t nat -X
-    iptables -t mangle -F
-    iptables -t mangle -X
-    iptables -P INPUT ACCEPT
-    iptables -P FORWARD ACCEPT
-    iptables -P OUTPUT ACCEPT
-    echo -e "${GREEN}   • Iptables direset${NC}"
-fi
-
-# 5. Nonaktifkan auto updates
-echo -e "${YELLOW}[5/7] Menonaktifkan auto updates...${NC}"
-
-if command -v apt &>/dev/null; then
-    apt remove unattended-upgrades -y
-elif command -v yum &>/dev/null; then
-    systemctl stop yum-cron
-    systemctl disable yum-cron
-    yum remove yum-cron -y
-fi
-echo -e "${GREEN}   • Auto updates dinonaktifkan${NC}"
-
-# 6. Restart SSH
-echo -e "${YELLOW}[6/7] Merestart SSH...${NC}"
+# Restart SSH
 systemctl restart sshd 2>/dev/null || systemctl restart ssh
-echo -e "${GREEN}   • SSH direstart dengan port 22${NC}"
 
-# 7. Bersihkan script keamanan
-echo -e "${YELLOW}[7/7] Membersihkan file sisa...${NC}"
-rm -f /root/secure*.sh 2>/dev/null
-rm -f /tmp/secure*.sh 2>/dev/null
-echo -e "${GREEN}   • File script dibersihkan${NC}"
+# Reset firewall
+if command -v ufw &>/dev/null; then
+ufw --force disable
+ufw --force reset
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 8080/tcp
+ufw allow 2022/tcp
+ufw --force enable
+echo "UFW restored"
+fi
 
-# Selesai
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}   UNINSTALL SELESAI!${NC}"
-echo -e "${GREEN}============================================${NC}"
-echo -e "${YELLOW}✅ VPS KEMBALI SEPERTI BARU:${NC}"
-echo -e "   • Port SSH: ${GREEN}22${NC}"
-echo -e "   • Root login: ${GREEN}BISA${NC}"
-echo -e "   • Password login: ${GREEN}BISA${NC}"
-echo -e "   • Fail2ban: ${RED}HAPUS${NC}"
-echo -e "   • Firewall: ${RED}RESET${NC}"
-echo -e "   • User rendzz: ${YELLOW}cek manual${NC}"
-echo -e ""
-echo -e "${YELLOW}⚠️  INFORMASI PENTING:${NC}"
-echo -e "1. Sekarang bisa login dengan:"
-echo -e "   ${GREEN}ssh root@ip-vps${NC}"
-echo -e "   ${GREEN}ssh root@ip-vps -p 22${NC}"
-echo -e ""
-echo -e "2. Kalau user rendzz masih ada, login dengan:"
-echo -e "   ${GREEN}ssh rendzz@ip-vps${NC}"
-echo -e ""
-echo -e "3. Firewall sudah MATI TOTAL - HATI-HATI!"
-echo -e "4. Disarankan install ulang keamanan dengan versi yang lebih ringan"
-echo -e ""
-echo -e "${RED}⚠️  VPS SEKARANG TIDAK AMAN! Langsung install ulang keamanan kalau perlu${NC}"
+# Restart services penting
+systemctl restart nginx 2>/dev/null
+systemctl restart wings 2>/dev/null
+systemctl restart mysql 2>/dev/null
+systemctl restart redis-server 2>/dev/null
 
-# Cek status akhir
-echo -e ""
-echo -e "${YELLOW}Status akhir:${NC}"
-echo -e "-------------------"
-ss -tulpn | grep :22
-echo -e "-------------------"
+echo "=================================="
+echo "VPS SUDAH KEMBALI DEFAULT"
+echo "=================================="
+echo "Login normal:"
+echo "ssh root@IP-VPS"
+echo ""
+echo "Port: 22"
+echo "Root login: ENABLED"
+echo "Password login: ENABLED"
