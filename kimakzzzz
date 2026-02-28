@@ -1,8 +1,28 @@
 #!/bin/bash
 
-echo "RESTORE VPS KE DEFAULT..."
+# Restore VPS ke default (SSH + Firewall)
 
-# Restore SSH config default
+NC='\033[0m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+
+echo -e "${GREEN}====================================${NC}"
+echo -e "${GREEN}   RESTORE VPS KE KONDISI DEFAULT${NC}"
+echo -e "${GREEN}====================================${NC}"
+
+# Pastikan dijalankan sebagai root
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}Harus root! Jalankan sebagai root.${NC}"
+   exit 1
+fi
+
+# Backup konfigurasi SSH
+echo -e "${YELLOW}Membuat backup sshd_config...${NC}"
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d)
+
+# Restore konfigurasi default SSH
+echo -e "${YELLOW}Mengembalikan konfigurasi default SSH...${NC}"
 cat > /etc/ssh/sshd_config <<EOF
 Port 22
 PermitRootLogin yes
@@ -16,36 +36,38 @@ AcceptEnv LANG LC_*
 Subsystem sftp /usr/lib/openssh/sftp-server
 EOF
 
-echo "SSH config restored"
+# Restart SSH service
+echo -e "${YELLOW}Restart SSH service...${NC}"
+systemctl restart sshd || systemctl restart ssh
 
-# Restart SSH
-systemctl restart sshd 2>/dev/null || systemctl restart ssh
-
-# Reset firewall
+# Reset firewall (UFW) ke kondisi default
 if command -v ufw &>/dev/null; then
-ufw --force disable
-ufw --force reset
-ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 8080/tcp
-ufw allow 2022/tcp
-ufw --force enable
-echo "UFW restored"
+    echo -e "${YELLOW}Mereset firewall UFW ke default...${NC}"
+    ufw --force disable
+    ufw --force reset
+    ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw --force enable
+    echo -e "${GREEN}UFW firewall di-reset ke default${NC}"
+else
+    echo -e "${RED}UFW tidak ditemukan. Jika pakai firewalld, perlu diatur manual.${NC}"
 fi
 
-# Restart services penting
-systemctl restart nginx 2>/dev/null
-systemctl restart wings 2>/dev/null
-systemctl restart mysql 2>/dev/null
-systemctl restart redis-server 2>/dev/null
+# Pastikan fail2ban restart (opsional)
+if command -v fail2ban-server &>/dev/null; then
+    echo -e "${YELLOW}Restart fail2ban...${NC}"
+    systemctl restart fail2ban
+fi
 
-echo "=================================="
-echo "VPS SUDAH KEMBALI DEFAULT"
-echo "=================================="
-echo "Login normal:"
-echo "ssh root@IP-VPS"
+echo -e "${GREEN}====================================${NC}"
+echo -e "${GREEN}✓ VPS KEMBALI KE KONDISI DEFAULT${NC}"
+echo -e "${GREEN}====================================${NC}"
+echo -e "Port SSH: 22"
+echo -e "Root login: ${GREEN}DISESUAIKAN ULANG${NC} (aktif)"
+echo -e "Password login: ${GREEN}AKTIF${NC}"
+echo -e "Firewall: ${GREEN}UFW RESET, port 22/80/443 terbuka${NC}"
 echo ""
-echo "Port: 22"
-echo "Root login: ENABLED"
-echo "Password login: ENABLED"
+echo -e "${YELLOW}PENTING: Coba login ulang sekarang.${NC}"
+echo -e "ssh root@IP-VPS-LO (gunakan password yang sesuai)"
+echo -e "${GREEN}Jangan lupa ganti password root jika diperlukan!${NC}"
